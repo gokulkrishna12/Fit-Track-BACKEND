@@ -28,6 +28,12 @@ const createWorkout = async (req, res) => {
             await redis.del(`analytics:${userId}`);
         }
 
+        const io = req.app.get('io');
+        if (io) {
+            const userId = req.user._id || req.user.id;
+            io.to(userId.toString()).emit('workout_updated');
+        }
+
         res.status(201).json(workout);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -57,6 +63,12 @@ const updateWorkout = async (req, res) => {
             await redis.del(`analytics:${userId}`);
         }
 
+        const io = req.app.get('io');
+        if (io) {
+            const userId = req.user._id || req.user.id;
+            io.to(userId.toString()).emit('workout_updated');
+        }
+
         res.status(200).json(updatedWorkout);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -81,6 +93,12 @@ const deleteWorkout = async (req, res) => {
         if (redis) {
             const userId = req.user._id || req.user.id;
             await redis.del(`analytics:${userId}`);
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            const userId = req.user._id || req.user.id;
+            io.to(userId.toString()).emit('workout_updated');
         }
 
         res.status(200).json({ id: req.params.id, message: 'Workout deleted successfully' });
