@@ -1,4 +1,4 @@
-const Workout = require('../models/workoutModel');
+const Workout = require('../models/Workout');
 const redis = require('../services/redisService');
 
 // @desc    Get all workouts
