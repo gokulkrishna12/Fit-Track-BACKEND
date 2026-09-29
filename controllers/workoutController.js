@@ -1,3 +1,84 @@
+const Workout = require('../models/workoutModel');
+const redis = require('../services/redisService');
+
+// @desc    Get all workouts
+// @route   GET /api/workouts
+// @access  Private
+const getWorkouts = async (req, res, next) => {
+    try {
+        const workouts = await Workout.find({ user: req.user._id || req.user.id }).sort({ date: -1, createdAt: -1 });
+        res.status(200).json(workouts);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Create new workout
+// @route   POST /api/workouts
+// @access  Private
+const createWorkout = async (req, res, next) => {
+    try {
+        const userId = req.user._id || req.user.id;
+        const workout = await Workout.create({
+            ...req.body,
+            user: userId
+        });
+
+        // Trigger real-time update on the frontend via Socket.IO
+        const io = req.app.get('io');
+        if (io) {
+            io.to(userId.toString()).emit('workout_updated');
+        }
+
+        res.status(201).json(workout);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Update workout
+// @route   PUT /api/workouts/:id
+// @access  Private
+const updateWorkout = async (req, res, next) => {
+    try {
+        const userId = req.user._id || req.user.id;
+        const workout = await Workout.findByIdAndUpdate(req.params.id, req.body, {
+            new: true,
+            runValidators: true
+        });
+
+        // Trigger real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(userId.toString()).emit('workout_updated');
+        }
+
+        res.status(200).json(workout);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Delete workout
+// @route   DELETE /api/workouts/:id
+// @access  Private
+const deleteWorkout = async (req, res, next) => {
+    try {
+        const userId = req.user._id || req.user.id;
+        await Workout.findByIdAndDelete(req.params.id);
+
+        // Trigger real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.to(userId.toString()).emit('workout_updated');
+        }
+
+        res.status(200).json({ message: 'Workout deleted' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 // @desc    Get workout analytics for dashboard
 // @route   GET /api/workouts/analytics
 // @access  Private
@@ -14,7 +95,7 @@ const getWorkoutAnalytics = async (req, res, next) => {
             }
         }
 
-        // 2. FETCH WORKOUTS AND CALCULATE IN JAVASCRIPT (Handles String Types Gracefully)
+        // 2. FETCH WORKOUTS AND CALCULATE IN JAVASCRIPT
         const workouts = await Workout.find({ user: userId });
 
         let totalWorkouts = workouts.length;
@@ -29,7 +110,7 @@ const getWorkoutAnalytics = async (req, res, next) => {
         const weeklyDataMap = {};
 
         workouts.forEach(w => {
-            // Force convert strings to numbers
+            // Force convert strings to numbers so math doesn't fail
             const sets = Number(w.sets) || 1;
             const reps = Number(w.reps) || 0;
             const weight = Number(w.weight) || 0;
@@ -72,4 +153,12 @@ const getWorkoutAnalytics = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
+};
+
+module.exports = {
+    getWorkouts,
+    createWorkout,
+    updateWorkout,
+    deleteWorkout,
+    getWorkoutAnalytics
 };
