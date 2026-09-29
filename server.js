@@ -5,7 +5,9 @@ const connectDB = require('./config/db');
 
 // Route imports
 const authRoutes = require('./routes/authRoutes');
-const workoutRoutes = require('./routes/workoutRoutes'); // Pudhusa add panna workout route
+const workoutRoutes = require('./routes/workoutRoutes');
+
+const errorHandler = require('./middleware/errorHandler');
 
 // Load env variables
 dotenv.config();
@@ -21,7 +23,9 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/workouts', workoutRoutes); // Workout routes-a inga connect panrom
+app.use('/api/workouts', workoutRoutes);
+
+app.use(errorHandler);
 
 // Basic Route to test
 app.get('/', (req, res) => {
