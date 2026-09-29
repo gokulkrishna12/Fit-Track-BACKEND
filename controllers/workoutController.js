@@ -1,4 +1,5 @@
 const Workout = require('../models/Workout');
+const redis = require('../services/redisService');
 
 const getWorkouts = async (req, res) => {
     try {
@@ -21,6 +22,11 @@ const createWorkout = async (req, res) => {
             weight,
             date
         });
+
+        if (redis) {
+            const userId = req.user._id || req.user.id;
+            await redis.del(`analytics:${userId}`);
+        }
 
         res.status(201).json(workout);
     } catch (error) {
@@ -46,6 +52,11 @@ const updateWorkout = async (req, res) => {
             { returnDocument: 'after' }
         );
 
+        if (redis) {
+            const userId = req.user._id || req.user.id;
+            await redis.del(`analytics:${userId}`);
+        }
+
         res.status(200).json(updatedWorkout);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -67,6 +78,11 @@ const deleteWorkout = async (req, res) => {
 
         await workout.deleteOne();
 
+        if (redis) {
+            const userId = req.user._id || req.user.id;
+            await redis.del(`analytics:${userId}`);
+        }
+
         res.status(200).json({ id: req.params.id, message: 'Workout deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -75,17 +91,28 @@ const deleteWorkout = async (req, res) => {
 
 const getWorkoutAnalytics = async (req, res, next) => {
     try {
-        // req.user.id comes from your existing auth middleware
         const userId = req.user._id || req.user.id;
+        const cacheKey = `analytics:${userId}`; // Unique cache key for this user
 
-        // 1. Overall Stats Aggregation (Total volume, reps, workouts)
+        // 1. CHECK CACHE FIRST (If Redis is active)
+        if (redis) {
+            const cachedData = await redis.get(cacheKey);
+            if (cachedData) {
+                return res.status(200).json({
+                    success: true,
+                    data: cachedData,
+                    cached: true // Tells the frontend this came from Redis
+                });
+            }
+        }
+
+        // 2. IF NOT CACHED, RUN MONGODB AGGREGATION
         const overviewStats = await Workout.aggregate([
             { $match: { user: userId } },
             {
                 $group: {
                     _id: null,
                     totalWorkouts: { $sum: 1 },
-                    // Calculate Total Volume: (sets * reps * weight)
                     totalVolume: { $sum: { $multiply: ["$sets", "$reps", "$weight"] } },
                     totalSets: { $sum: "$sets" },
                     totalReps: { $sum: "$reps" }
@@ -93,7 +120,6 @@ const getWorkoutAnalytics = async (req, res, next) => {
             }
         ]);
 
-        // 2. Weekly Trend Aggregation (Last 7 days volume)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -101,23 +127,29 @@ const getWorkoutAnalytics = async (req, res, next) => {
             { $match: { user: userId, date: { $gte: sevenDaysAgo } } },
             {
                 $group: {
-                    // Group by the date string (YYYY-MM-DD)
-                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                    _id: { $dateToString: { format: "\%Y-\%m-\%d", date: "$date" } },
                     dailyVolume: { $sum: { $multiply: ["$sets", "$reps", "$weight"] } }
                 }
             },
-            { $sort: { _id: 1 } } // Sort by date ascending
+            { $sort: { _id: 1 } }
         ]);
+
+        const analyticsData = {
+            overview: overviewStats[0] || { totalWorkouts: 0, totalVolume: 0, totalSets: 0, totalReps: 0 },
+            weeklyTrend: weeklyTrend
+        };
+
+        // 3. STORE IN REDIS FOR NEXT TIME (Expires in 1 hour / 3600 seconds)
+        if (redis) {
+            await redis.set(cacheKey, analyticsData, { ex: 3600 });
+        }
 
         res.status(200).json({
             success: true,
-            data: {
-                overview: overviewStats[0] || { totalWorkouts: 0, totalVolume: 0, totalSets: 0, totalReps: 0 },
-                weeklyTrend: weeklyTrend
-            }
+            data: analyticsData,
+            cached: false
         });
     } catch (error) {
-        // This will be caught by the Error Handler we built in Phase 2!
         next(error);
     }
 };
